@@ -3,6 +3,7 @@ package bffmt
 import (
 	"os"
 	"regexp"
+	"strings"
 
 	"github.com/baris-inandi/bfgo/lang/readcode"
 	"github.com/baris-inandi/bfgo/utils"
@@ -21,10 +22,10 @@ func MinifyFile(files ...string) {
 	var mutualCancel = regexp.MustCompile(`\+-|-\+|><|<>`)
 
 	// matches any odd (unconditional) cell-reseters, except ODD_RESET
-	var isOddReset = regexp.MustCompile(`\[(?:(?:\+\+){1,128}\+|(?:--){1,128}-)\]`)
+	var isOddReset = regexp.MustCompile(`\[(?:(?:\+\+){0,128}\+|(?:--){1,128}-)\]`)
 
 	// matches any even (conditional break) cell-reseters, except EVEN_RESET
-	var isEvenReset = regexp.MustCompile(`\[(?:(?:\+\+){2,128}|(?:--){2,128})\]`)
+	var isEvenReset = regexp.MustCompile(`\[(?:(?:\+\+){1,128}|(?:--){2,128})\]`)
 
 	// matches ODD_RESET, preceded by 1 or more "+" or "-" (mixed)
 	var isPrefixedReset = regexp.MustCompile(`[+-]+\[-\]`)
@@ -102,6 +103,43 @@ func MinifyFile(files ...string) {
 		return s
 	}
 
+	// # Compression Ratio Optimizer
+	//
+	// Uses [frequency analysis] to increase compression-ratio by 3rd-party algorithms.
+	//
+	// Current implementation only replaces minified "-" cell-reseters.
+	// It assumes there's no "+" reseters.
+	//
+	// [frequency analysis]: https://en.wikipedia.org/wiki/Frequency_analysis
+	var optimizeCompress = func(s string) string {
+		// "I hope the compiler optimizes this from 4n iterations to n iters"
+		// @Rudxain
+		plus, minus := strings.Count(s, "+"), strings.Count(s, "-")
+		odd, even := strings.Count(s, ODD_RESET), strings.Count(s, EVEN_RESET)
+		// this ensures the choice is unbiased
+		isMorePlusThanMinus := plus-minus+odd+2*even > 0
+
+		// A space-time tradeoff isn't worth it,
+		// because time is O(n) and space is O(1) (ignoring s).
+		// If (while counting) we were to allocate a list of indices to all ocurrences
+		// of ODD_RESET and EVEN_RESET, space would become O(n),
+		// but time would still be O(n) (despite being practically faster).
+		// So we should iterate over the whole s, rather than a list of pointers to s.
+		//
+		// CPU cache already helps a bit.
+		// allocating more memory just reduces the available cache space,
+		// therefore reducing iteration speed
+		if isMorePlusThanMinus {
+			if odd > 0 {
+				s = strings.ReplaceAll(s, ODD_RESET, "[+]")
+			}
+			if even > 0 {
+				s = strings.ReplaceAll(s, EVEN_RESET, "[++]")
+			}
+		}
+		return s
+	}
+
 	// # Advanced BF minifier
 	//
 	// Explained in [#2]. It assumes s only has valid opcodes.
@@ -123,7 +161,7 @@ func MinifyFile(files ...string) {
 		s = isEvenReset.ReplaceAllLiteralString(s, EVEN_RESET)
 		s = isOddReset.ReplaceAllLiteralString(s, ODD_RESET)
 		s = isPrefixedReset.ReplaceAllLiteralString(s, ODD_RESET)
-		return s
+		return optimizeCompress(s)
 	}
 
 	for _, f := range files {
