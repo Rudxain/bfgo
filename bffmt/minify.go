@@ -9,7 +9,28 @@ import (
 	"github.com/baris-inandi/bfgo/utils"
 )
 
-func MinifyFile(files ...string) {
+/*
+// Minification level
+type Level int
+
+// enum emulation
+// https://stackoverflow.com/a/14426447
+const (
+
+	// only removes non-BF chars,
+	// therefore it has maximum portability
+	// across implementations.
+	BASIC Level = iota
+	// assumes code isn't a main program.
+	// useful for "libraries" and "modules", such as subroutines.
+	LIB Level = iota
+	// assume all code will be run as-is
+	MAIN Level = iota
+
+)
+*/
+
+func MinifyFile( /*l Level,*/ files ...string) {
 	// canonical "-" unconditional cell-reseter
 	const ODD_RESET = "[-]"
 	// canonical "-" conditional (break-if-even) cell-reseter
@@ -30,6 +51,49 @@ func MinifyFile(files ...string) {
 	// matches ODD_RESET, preceded by 1 or more "+" or "-" (mixed)
 	var isPrefixedReset = regexp.MustCompile(`[+-]+\[-\]`)
 
+	// returns a pair of indices of matching braces, searched from start.
+	// -1 if not found
+	//
+	// `start` ignores all runes before that index.
+	// If `start` is negative, it becomes relative to the end.
+	var getMatchingBraces = func(s string, start int) (int, int) {
+		size := len(s)
+		start = utils.RelativeIndex(start, size)
+
+		open := -1
+		for start < size {
+			c := s[start]
+			if c == '[' {
+				open = start
+				break
+			}
+			start += 1
+		}
+
+		// avoid double-counting "["
+		start++
+		depth := 0
+		// this covers the edge-case where
+		// "[" is located just before EOF (start >= size)
+		close := -1
+		for start < size {
+			c := s[start]
+			if c == '[' {
+				depth++
+			}
+			if c == ']' {
+				if depth == 0 {
+					close = start
+					break
+				}
+				depth--
+			}
+			start += 1
+		}
+
+		return open, close
+	}
+
 	// finds index of 1st byte that isn't in the charset "[],.", or -1 if not found.
 	//
 	// `start` ignores all runes before that index.
@@ -47,6 +111,53 @@ func MinifyFile(files ...string) {
 			start += 1
 		}
 		return -1
+	}
+
+	// removes consecutive loops, keeping the 1st.
+	//
+	// current impl is identity fn
+	var rmLoopLoop = func(s string) string {
+		return s
+	}
+
+	// removes all loops before any memory write is done.
+	//
+	// this is sound, because memory is all-zeros, and loops are guaranteed to never run.
+	var rm0Loop = func(s string) string {
+		for i := 0; i < len(s); i++ {
+			c := s[i]
+			if c == ',' || c == '+' || c == '-' {
+				// can't guarantee cell is 0
+				break
+			}
+			if c == '[' {
+				open, close := getMatchingBraces(s, i)
+				// assert open == i
+				s = s[0:open] + s[close+1:]
+			}
+		}
+		return s
+	}
+
+	// removes all bytes after last char in the set ".,]".
+	// this ensures stdin side effects still happen,
+	// and infinite loops are still executed.
+	//
+	// a mismatched "[" doesn't matter, because it either:
+	//
+	// 1. continues execution
+	//
+	// 2. halts/crashes the program
+	var rmAfterEffects = func(s string) string {
+		// reverse iter
+		for i := len(s) - 1; i >= 0; i-- {
+			c := s[i]
+			if c == '.' || c == ',' || c == ']' {
+				s = s[0 : i+1]
+				break
+			}
+		}
+		return s
 	}
 
 	// # Memory Simulator
@@ -155,8 +266,12 @@ func MinifyFile(files ...string) {
 		}
 		// order matters, (from this point onwards)
 
+		s = rmAfterEffects(s)
+		// order matters, (from this point onwards)
 		// TO-DO: mem-sim must supersede both regexps above
 		s = memSim(s)
+		s = rmLoopLoop(s)
+		s = rm0Loop(s)
 		// these 3 are "amplified" by mem-sim
 		s = isEvenReset.ReplaceAllLiteralString(s, EVEN_RESET)
 		s = isOddReset.ReplaceAllLiteralString(s, ODD_RESET)
