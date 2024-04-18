@@ -257,26 +257,35 @@ func MinifyFile( /*l Level,*/ files ...string) {
 	//
 	// [#2]: https://github.com/baris-inandi/brainfuck-go/issues/2
 	var minify = func(s string) string {
-		s = x256PlusMinus.ReplaceAllLiteralString(s, "")
+		for {
+			tmp := s
 
-		var size int
-		for do := true; do; do = (size != len(s)) {
-			size = len(s)
-			s = mutualCancel.ReplaceAllLiteralString(s, "")
+			s = x256PlusMinus.ReplaceAllLiteralString(s, "")
+
+			var size int
+			for do := true; do; do = (size != len(s)) {
+				size = len(s)
+				s = mutualCancel.ReplaceAllLiteralString(s, "")
+			}
+
+			s = rmAfterEffects(s)
+			// order matters, (from this point onwards)
+			// TO-DO: mem-sim must supersede both regexps above
+			s = memSim(s)
+			s = rmLoopLoop(s)
+			s = rm0Loop(s)
+			// these 3 are "amplified" by mem-sim
+			s = isEvenReset.ReplaceAllLiteralString(s, EVEN_RESET)
+			s = isOddReset.ReplaceAllLiteralString(s, ODD_RESET)
+			s = isPrefixedReset.ReplaceAllLiteralString(s, ODD_RESET)
+
+			// prevent potential infinite loop and OOM panic
+			// by using `>=` rather than `==`
+			if len(s) >= len(tmp) {
+				// ensure smallest s
+				return optimizeCompress(tmp)
+			}
 		}
-		// order matters, (from this point onwards)
-
-		s = rmAfterEffects(s)
-		// order matters, (from this point onwards)
-		// TO-DO: mem-sim must supersede both regexps above
-		s = memSim(s)
-		s = rmLoopLoop(s)
-		s = rm0Loop(s)
-		// these 3 are "amplified" by mem-sim
-		s = isEvenReset.ReplaceAllLiteralString(s, EVEN_RESET)
-		s = isOddReset.ReplaceAllLiteralString(s, ODD_RESET)
-		s = isPrefixedReset.ReplaceAllLiteralString(s, ODD_RESET)
-		return optimizeCompress(s)
 	}
 
 	for _, f := range files {
